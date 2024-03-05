@@ -1,11 +1,10 @@
 CC          = gcc
 CFLAGS      = -Wall -Wextra -std=c11
 RM          = rm -f
-SERVER      = server.c
-SERVER_EXEC = server
-CLIENT      = client.c
-CLIENT_EXEC = client
-
+SERVER      = tcp_server.c
+SERVER_EXEC = tcp_server
+CLIENT      = tcp_client.c
+CLIENT_EXEC = tcp_client
 
 all: $(SERVER_EXEC) $(CLIENT_EXEC)
 
