@@ -43,15 +43,20 @@ int main() {
         perror("connection failed");
         exit(EXIT_FAILURE);
     }
-    printf("Connected to server\n");
+    printf("Connected to server\n"
+            "If you want to disconnect then press 'disconnect'\n");
     pthread_create(&recv_thread, NULL, receive_and_print, &client_socket);
 
     while (1) {
         printf("Enter message: ");
         fgets(message, 1024, stdin);
         send(client_socket, message, strlen(message), 0);
+        if (strncmp(message, "disconnect", 10) == 0) {
+            close(client_socket);
+            printf("Disconnected successfully.\n");
+            return;
+        }   
     }
-
     pthread_join(recv_thread, NULL);
     close(client_socket);
     return 0;

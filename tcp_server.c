@@ -7,9 +7,14 @@
 #include <pthread.h>
 
 #define PORT 12000
-#define MAX_CLIENTS 2
+#define MAX_CLIENTS 10
 
-int clients[MAX_CLIENTS];
+typedef struct {
+    int socket_fd;
+    int client_id;
+} Client;
+
+Client clients[MAX_CLIENTS];
 pthread_t client_threads[MAX_CLIENTS];
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -20,14 +25,33 @@ void *receive_send(void *arg) {
 
     while ((read_size = recv(client_socket, buffer, 1024, 0)) > 0) {
         buffer[read_size] = '\0';
+        if (strncmp(buffer, "disconnect", 10) == 0) {
+            printf("Client disconnected\n");
+            disconnect_user(client_socket);
+        }
+
         printf("Received message: %s", buffer);
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i] != client_socket && clients[i] != 0) {
-                send(clients[i], buffer, strlen(buffer), 0);
+            if (clients[i].socket_fd != client_socket && clients[i].socket_fd != 0) {
+                send(clients[i].socket_fd, buffer, strlen(buffer), 0);
             }
         }
     }
     return (void *)read_size;
+}
+
+int disconnect_user(int client_socket) {
+    pthread_mutex_lock(&mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd == client_socket) {
+            clients[i].socket_fd = 0;
+            pthread_mutex_unlock(&mutex);
+            break;
+        }
+    }
+    close(client_socket);
+    printf("The client was disconnected but was not found in the list");
+    return 0;
 }
 
 void *handle_client(void *arg) {
@@ -45,16 +69,10 @@ void *handle_client(void *arg) {
 
     if (read_size == 0) {
         printf("Client disconnected\n");
-        pthread_mutex_lock(&mutex);
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i] == client_socket) {
-                clients[i] = 0;
-                break;
-            }
-        }
-        pthread_mutex_unlock(&mutex);
+        disconnect_user(client_socket);
     } else if (read_size == -1) {
         perror("recv failed");
+        disconnect_user(client_socket);
     }
 
     close(client_socket);
@@ -63,11 +81,17 @@ void *handle_client(void *arg) {
 
 int main() {
     int server_socket, client_socket, address_length;
+    int opt = 1;
     struct sockaddr_in server_addr, client_addr;
 
     memset(clients, 0, sizeof(clients));
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt error");
         exit(EXIT_FAILURE);
     }
 
@@ -96,9 +120,9 @@ int main() {
 
         pthread_mutex_lock(&mutex);
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i] == 0) {
-                clients[i] = client_socket;
-                pthread_create(&client_threads[i], NULL, handle_client, &clients[i]);
+            if (clients[i].socket_fd == 0) {
+                clients[i].socket_fd = client_socket;
+                pthread_create(&client_threads[i], NULL, handle_client, &clients[i].socket_fd);
                 break;
             }
         }
