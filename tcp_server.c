@@ -10,6 +10,58 @@
 #define MAX_CLIENTS 10
 
 typedef struct {
+    int items[MAX_CLIENTS];
+    int top;
+} Stack;
+
+Stack stack = { .items = {0} };
+
+void initialize_stack(Stack *stack) {
+    stack->top = -1;
+}
+
+int is_empty(Stack *stack) {
+    return stack->top == -1;
+}
+
+int is_full(Stack *stack) {
+    return stack->top == MAX_CLIENTS - 1;
+}
+
+void push(Stack *stack, int items) {
+    if (is_full(&stack)) {
+        printf("Stack overflow");
+        return;
+    }
+    stack->items[++stack->top] = items;
+}
+
+int pop(Stack *stack) {
+    int pop_value;
+    if (is_empty) {
+        printf("Stack underflow");
+        return -1; // Error value
+    }
+    pop_value = stack->items[stack->top];
+    stack->items[stack->top--] = 0;
+    return pop_value;
+}
+
+void available_indeces(Stack *stack) {
+    if (isEmpty(stack)) {
+        printf("All indices are avaiable\n");
+        return;
+    }
+    printf("Stack contents:\n");
+    for (int i = 0; i < 13; i++) {
+        if (stack->items[i] == 0) {
+            printf("%d is available\n", i);
+        }
+    }
+}
+
+
+typedef struct {
     int socket_fd;
     int client_id;
 } Client;
@@ -20,21 +72,37 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void *receive_send(void *arg) {
     int client_socket = *(int *)arg;
-    int read_size;
+    int read_size, client_selected;
     char buffer[1024];
+    char select_client;
 
     while ((read_size = recv(client_socket, buffer, 1024, 0)) > 0) {
         buffer[read_size] = '\0';
-        if (strncmp(buffer, "disconnect", 10) == 0)  {
+        if (strncmp(buffer, "disconnect", strlen("disconnect")) == 0)  {
             disconnect_user(client_socket);
             break;
+        }
+        if (strncmp(buffer, "users", strlen("users")) == 0) {
+            show_all_users(client_socket);
+        } 
+        else if (strncmp(buffer, "connect", strlen("connect"))) {
+            printf("Enter the client you want to connect: ");
+            fgets(select_client, sizeof(select_client), stdin);
+            // TODO: Implement client selection to chat
+            client_selected = atoi(select_client);
+            if (client_selected == -1) {
+                printf("Client unavailable");
+            }
         }
 
         printf("Received message: %s", buffer);
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket_fd != client_socket && clients[i].socket_fd != 0) {
+            if (clients[i].socket_fd == client_socket) {
                 send(clients[i].socket_fd, buffer, strlen(buffer), 0);
                 break;
+            }
+            else if (clients[i].socket_fd == 0) {
+                return 0;
             }
         }
     }
@@ -49,8 +117,8 @@ int disconnect_user(int client_socket) {
     pthread_mutex_lock(&mutex);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket_fd == client_socket) {
-            clients[i].socket_fd = 0;
-            clients[i].client_id = 0;
+            clients[i].socket_fd = -1;
+            clients[i].client_id = -1;
             pthread_mutex_unlock(&mutex);
             printf("Client was disconnected successfully\n");
             close(client_socket);
@@ -77,12 +145,24 @@ int create_client(int socket_fd) {
     return next_client_id - 1;
 }
 
+int show_all_users(int client_socket) {
+    int size = sizeof(clients)/sizeof(clients[0]);
+    char info[100];
+    for (int i=0; i<size; i++) {
+        if (clients[i].socket_fd != 0 && clients[i].client_id != 0) {
+            sprintf(info, "%d client with %d file descriptor", clients[i].client_id, clients[i].socket_fd);
+            send(client_socket, info, 1024, 0);
+        }
+    }
+    return 0;
+}
+
 int main() {
     int server_socket, client_socket, address_length;
     int opt = 1;
     struct sockaddr_in server_addr, client_addr;
 
-    memset(clients, 0, sizeof(clients));
+    memset(clients, -1, sizeof(clients));
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
