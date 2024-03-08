@@ -25,18 +25,23 @@ void *receive_send(void *arg) {
 
     while ((read_size = recv(client_socket, buffer, 1024, 0)) > 0) {
         buffer[read_size] = '\0';
-        if (strncmp(buffer, "disconnect", 10) == 0) {
-            printf("Client disconnected\n");
+        if (strncmp(buffer, "disconnect", 10) == 0)  {
             disconnect_user(client_socket);
+            break;
         }
 
         printf("Received message: %s", buffer);
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i].socket_fd != client_socket && clients[i].socket_fd != 0) {
                 send(clients[i].socket_fd, buffer, strlen(buffer), 0);
+                break;
             }
         }
     }
+    if (read_size == 0 || read_size == -1) {
+        disconnect_user(client_socket);
+    }
+
     return (void *)read_size;
 }
 
@@ -45,38 +50,31 @@ int disconnect_user(int client_socket) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket_fd == client_socket) {
             clients[i].socket_fd = 0;
+            clients[i].client_id = 0;
             pthread_mutex_unlock(&mutex);
-            break;
+            printf("Client was disconnected successfully\n");
+            close(client_socket);
+            return 0;
         }
     }
     close(client_socket);
-    printf("The client was disconnected but was not found in the list");
+    printf("The client was disconnected but was not found in the list\n");
     return 0;
 }
 
-void *handle_client(void *arg) {
-    int client_socket = *(int *)arg;
-    int size = sizeof(clients)/sizeof(clients[0]);
-    int read_size;
-    pthread_t thread[MAX_CLIENTS];
+int create_client(int socket_fd) {
+    static int next_client_id = 0;
 
-    for(int i=0; i<size; i++){
-        pthread_create(&thread[i], NULL, receive_send, &clients[i]);
-    }
-    for(int i=0; i<size; i++) {
-        pthread_join(thread[i], (void **)&read_size);
-    }
+    pthread_mutex_lock(&mutex);
+    clients[next_client_id].client_id = next_client_id;
+    clients[next_client_id].socket_fd = socket_fd;
 
-    if (read_size == 0) {
-        printf("Client disconnected\n");
-        disconnect_user(client_socket);
-    } else if (read_size == -1) {
-        perror("recv failed");
-        disconnect_user(client_socket);
-    }
-
-    close(client_socket);
-    pthread_exit(NULL);
+    pthread_create(&client_threads[next_client_id], NULL, receive_send, &clients[next_client_id].socket_fd);
+    next_client_id++;
+    
+    pthread_mutex_unlock(&mutex);
+    printf("Client added at list\n");
+    return next_client_id - 1;
 }
 
 int main() {
@@ -117,16 +115,7 @@ int main() {
         }
         printf("New connection, socket fd is %d, ip is: %s, port : %d\n",
                client_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-        pthread_mutex_lock(&mutex);
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket_fd == 0) {
-                clients[i].socket_fd = client_socket;
-                pthread_create(&client_threads[i], NULL, handle_client, &clients[i].socket_fd);
-                break;
-            }
-        }
-        pthread_mutex_unlock(&mutex);
+        create_client(client_socket);
     }
     return 0;
 }

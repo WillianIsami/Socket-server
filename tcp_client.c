@@ -15,11 +15,11 @@ void *receive_and_print(void *arg) {
     char message[1024];
 
     while ((read_recv = recv(client_socket, message, 1024, 0)) > 0) {
-        printf("\nResponse: %s\n", message);
+        printf("\nResponse: %s", message);
+        memset(message, 0, sizeof(message));
     }
     pthread_exit(NULL);
 }
-
 
 int main() {
     int client_socket;
@@ -49,7 +49,7 @@ int main() {
 
     while (1) {
         printf("Enter message: ");
-        fgets(message, 1024, stdin);
+        fgets(message, sizeof(message), stdin);
         send(client_socket, message, strlen(message), 0);
         if (strncmp(message, "disconnect", 10) == 0) {
             close(client_socket);
