@@ -1,12 +1,16 @@
 CC          = gcc
 CFLAGS      = -Wall -Wextra -std=c11
 RM          = rm -f
+BUILD_DIR 	= build
 SERVER      = tcp_server.c
-SERVER_EXEC = tcp_server
 CLIENT      = tcp_client.c
-CLIENT_EXEC = tcp_client
+SERVER_EXEC = $(BUILD_DIR)/tcp_server
+CLIENT_EXEC = $(BUILD_DIR)/tcp_client
 
-all: $(SERVER_EXEC) $(CLIENT_EXEC)
+all: $(BUILD_DIR) $(SERVER_EXEC) $(CLIENT_EXEC) 
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 $(SERVER_EXEC): $(SERVER)
 	$(CC) $(CFLAGS) -o $@ $^

@@ -3,16 +3,8 @@
 
 ## How to run server:
     make
-    ./tcp_server
-
-    or 
-
-    make run_server
+    ./build/tcp_server
 
 ## How to run client:
     make
-    ./tcp_client
-
-    or 
-
-    make run_client
+    ./build/tcp_client
