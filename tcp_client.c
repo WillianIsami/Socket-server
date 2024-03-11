@@ -15,8 +15,8 @@ void *receive_and_print(void *arg) {
     char message[1024];
 
     while ((read_recv = recv(client_socket, message, 1024, 0)) > 0) {
+        message[read_recv] = '\0';
         printf("\nResponse: %s", message);
-        memset(message, 0, sizeof(message));
     }
     pthread_exit(NULL);
 }
@@ -50,12 +50,16 @@ int main() {
     while (1) {
         printf("Enter message: ");
         fgets(message, sizeof(message), stdin);
+        if (message[0] == '\n') {
+            printf("Nothing to send\n");
+            continue;
+        }
         send(client_socket, message, strlen(message), 0);
         if (strncmp(message, "disconnect", 10) == 0) {
             close(client_socket);
             printf("Disconnected successfully.\n");
             return;
-        }   
+        }
     }
     pthread_join(recv_thread, NULL);
     close(client_socket);
