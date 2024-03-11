@@ -5,164 +5,169 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include <sys/select.h>
 
 #define PORT 12000
 #define MAX_CLIENTS 10
 
 typedef struct {
-    int items[MAX_CLIENTS];
-    int top;
-} Stack;
-
-Stack stack = { .items = {0} };
-
-void initialize_stack(Stack *stack) {
-    stack->top = -1;
-}
-
-int is_empty(Stack *stack) {
-    return stack->top == -1;
-}
-
-int is_full(Stack *stack) {
-    return stack->top == MAX_CLIENTS - 1;
-}
-
-void push(Stack *stack, int items) {
-    if (is_full(&stack)) {
-        printf("Stack overflow");
-        return;
-    }
-    stack->items[++stack->top] = items;
-}
-
-int pop(Stack *stack) {
-    int pop_value;
-    if (is_empty) {
-        printf("Stack underflow");
-        return -1; // Error value
-    }
-    pop_value = stack->items[stack->top];
-    stack->items[stack->top--] = 0;
-    return pop_value;
-}
-
-void available_indeces(Stack *stack) {
-    if (isEmpty(stack)) {
-        printf("All indices are avaiable\n");
-        return;
-    }
-    printf("Stack contents:\n");
-    for (int i = 0; i < 13; i++) {
-        if (stack->items[i] == 0) {
-            printf("%d is available\n", i);
-        }
-    }
-}
-
-
-typedef struct {
-    int socket_fd;
     int client_id;
+    int socket_fd;
 } Client;
 
-Client clients[MAX_CLIENTS];
-pthread_t client_threads[MAX_CLIENTS];
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+typedef struct {
+    Client *clients;
+    pthread_t *threads;
+    int socket;
+} ThreadArgs;
+
+int estabilish_connection(Client clients) {
+    // TODO: Implementation of automatic connection stabilization between two clients
+    return 0;
+}
+
 void *receive_send(void *arg) {
-    int client_socket = *(int *)arg;
-    int read_size, client_selected;
+    ThreadArgs *args = (ThreadArgs*)arg;
+    Client *clients = args->clients;
+    pthread_t *threads = args->threads;
+    int client_socket = args->socket;
+    int read_size;
+    int client_selected = -1;
     char buffer[1024];
-    char select_client;
+    char select_client[1024];
+    char *choose_client = "Which client are you want to connect?";
 
     while ((read_size = recv(client_socket, buffer, 1024, 0)) > 0) {
         buffer[read_size] = '\0';
         if (strncmp(buffer, "disconnect", strlen("disconnect")) == 0)  {
-            disconnect_user(client_socket);
+            disconnect_user(clients, client_socket);
+            *threads = 0;
             break;
         }
         if (strncmp(buffer, "users", strlen("users")) == 0) {
-            show_all_users(client_socket);
+            show_all_users(clients, client_socket);
         } 
-        else if (strncmp(buffer, "connect", strlen("connect"))) {
-            printf("Enter the client you want to connect: ");
-            fgets(select_client, sizeof(select_client), stdin);
-            // TODO: Implement client selection to chat
+        if (strncmp(buffer, "connect", strlen("connect")) == 0) {
+            send(client_socket, choose_client, strlen(choose_client), 0);
+            int size_test = recv(client_socket, select_client, 1024, 0);
+            select_client[size_test] = '\0';
             client_selected = atoi(select_client);
-            if (client_selected == -1) {
-                printf("Client unavailable");
+            if (client_selected < 0) {
+                printf("Client unavailable\n");
             }
+            continue;
         }
-
         printf("Received message: %s", buffer);
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket_fd == client_socket) {
-                send(clients[i].socket_fd, buffer, strlen(buffer), 0);
-                break;
-            }
-            else if (clients[i].socket_fd == 0) {
-                return 0;
+        if (client_selected >= 0) {
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                if (clients[i].client_id == client_selected) {
+                    send(clients[i].socket_fd, buffer, strlen(buffer), 0);
+                    break;
+                }
             }
         }
     }
     if (read_size == 0 || read_size == -1) {
-        disconnect_user(client_socket);
+        disconnect_user(clients, client_socket);
+        *threads = 0;
+        pthread_exit(NULL);
     }
-
     return (void *)read_size;
 }
 
-int disconnect_user(int client_socket) {
+int is_full(Client *clients) {
+    return clients[MAX_CLIENTS].socket_fd != -1;
+}
+
+int find_index(Client *clients) {
+    for (int i=0; i<MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd == -1) { // Each element of the clients[] is initialized to -1
+            return i;
+        }
+    }
+    printf("The server is full. Try again later");
+    return -2;
+}
+
+int create_client(Client *clients, int socket_fd) {
+    pthread_t client_threads[10];
+    memset(client_threads, 0, sizeof(client_threads));
+    int index;
+    static int static_client_id = 0;
+
+    if (is_full(clients)) {
+        perror("Stack overflow\n");
+        return -1;
+    }
+    pthread_mutex_lock(&mutex);
+    index = find_index(clients);
+    
+    clients[index].client_id = static_client_id;
+    clients[index].socket_fd = socket_fd;
+    
+    ThreadArgs args;
+    args.clients = clients;
+    args.socket = socket_fd;
+    args.threads = &client_threads[index];
+    pthread_create(&client_threads[index], NULL, receive_send, &args);
+    pthread_mutex_unlock(&mutex);
+    printf("Thread created successfully\n");
+    static_client_id++;
+    return 0;
+}
+
+int organize_list(Client *clients) {
+    Client temp;
+    pthread_mutex_lock(&mutex);
+    for (int i=0; i<MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd == -1 && clients[i+1].socket_fd != -1) {
+            temp = clients[i];
+            clients[i] = clients[i+1];
+            clients[i+1] = temp;
+        }
+    }
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}
+
+int disconnect_user(Client *clients, int client_socket) {
+    int on_list=0;
     pthread_mutex_lock(&mutex);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket_fd == client_socket) {
             clients[i].socket_fd = -1;
             clients[i].client_id = -1;
-            pthread_mutex_unlock(&mutex);
-            printf("Client was disconnected successfully\n");
-            close(client_socket);
-            return 0;
+            on_list = 1;
+            break;
         }
     }
+    on_list ? printf("Client was disconnected successfully\n") : printf("The client was disconnected but was not found in the list\n");
+    pthread_mutex_unlock(&mutex);
     close(client_socket);
-    printf("The client was disconnected but was not found in the list\n");
+    organize_list(clients);
     return 0;
 }
 
-int create_client(int socket_fd) {
-    static int next_client_id = 0;
-
-    pthread_mutex_lock(&mutex);
-    clients[next_client_id].client_id = next_client_id;
-    clients[next_client_id].socket_fd = socket_fd;
-
-    pthread_create(&client_threads[next_client_id], NULL, receive_send, &clients[next_client_id].socket_fd);
-    next_client_id++;
-    
-    pthread_mutex_unlock(&mutex);
-    printf("Client added at list\n");
-    return next_client_id - 1;
-}
-
-int show_all_users(int client_socket) {
-    int size = sizeof(clients)/sizeof(clients[0]);
+void show_all_users(Client *clients, int client_socket) {
     char info[100];
-    for (int i=0; i<size; i++) {
-        if (clients[i].socket_fd != 0 && clients[i].client_id != 0) {
+    printf("Stack contents:\n");
+    for (int i=0; i<MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd != -1 && clients[i].client_id != -1) {
             sprintf(info, "%d client with %d file descriptor", clients[i].client_id, clients[i].socket_fd);
             send(client_socket, info, 1024, 0);
         }
     }
-    return 0;
 }
 
 int main() {
     int server_socket, client_socket, address_length;
     int opt = 1;
     struct sockaddr_in server_addr, client_addr;
+    Client clients[MAX_CLIENTS+1]; // Get the size of these clients using MAX_CLIENTS.
 
-    memset(clients, -1, sizeof(clients));
+    memset(clients,  -1, sizeof(clients));
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
@@ -188,14 +193,39 @@ int main() {
     printf("Server listening on port %d\n", PORT);
 
     address_length = sizeof(struct sockaddr_in);
-    while ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, (socklen_t *)&address_length))) {
-        if (client_socket < 0) {
-            perror("accept failed");
+    fd_set readfds;
+    char buffer[1024];
+    
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(server_socket, &readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+
+        int max_fd = server_socket > STDIN_FILENO ? server_socket : STDIN_FILENO;
+
+        if (select(max_fd + 1, &readfds, NULL, NULL, NULL) < 0) {
+            perror("Select failed");
             exit(EXIT_FAILURE);
         }
-        printf("New connection, socket fd is %d, ip is: %s, port : %d\n",
-               client_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        create_client(client_socket);
+
+        if (FD_ISSET(server_socket, &readfds)) {
+            client_socket = accept(server_socket, (struct sockaddr *)&client_addr, (socklen_t *)&address_length);
+            if (client_socket < 0) {
+                perror("accept failed");
+                exit(EXIT_FAILURE);
+            }
+            printf("New connection, socket fd is %d, ip is: %s, port : %d\n",
+                client_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            create_client(clients, client_socket);
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            fgets(buffer, sizeof(buffer), stdin);
+            if (strcmp(buffer, "shutdown\n") == 0) {
+                printf("Shutting down the server...\n");
+                break;
+            }
+        }
     }
     return 0;
 }
